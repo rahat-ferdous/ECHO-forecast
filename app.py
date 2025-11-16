@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
+import folium
+from streamlit_folium import st_folium
 from sklearn.ensemble import RandomForestClassifier
 
 # Page configuration
@@ -18,13 +18,36 @@ st.markdown("""
 *Predicting communities at risk of environmental regulatory failures using machine learning*
 """)
 
-# Generate sample data function
+# Generate sample data with realistic US coordinates
 def generate_sample_data():
     np.random.seed(42)
-    n_facilities = 200
+    n_facilities = 150
+    
+    # Real US city coordinates for more realistic distribution
+    city_coordinates = {
+        'Los Angeles, CA': (34.05, -118.24), 'Houston, TX': (29.76, -95.36), 
+        'Chicago, IL': (41.87, -87.62), 'Phoenix, AZ': (33.44, -112.07),
+        'Philadelphia, PA': (39.95, -75.16), 'San Antonio, TX': (29.42, -98.49),
+        'San Diego, CA': (32.71, -117.16), 'Dallas, TX': (32.77, -96.79),
+        'San Jose, CA': (37.33, -121.88), 'Detroit, MI': (42.33, -83.04),
+        'Jacksonville, FL': (30.33, -81.65), 'Indianapolis, IN': (39.76, -86.15),
+        'San Francisco, CA': (37.77, -122.41), 'Columbus, OH': (39.96, -82.99),
+        'Charlotte, NC': (35.22, -80.84), 'Seattle, WA': (47.60, -122.33),
+        'Denver, CO': (39.73, -104.99), 'Boston, MA': (42.36, -71.05),
+        'Atlanta, GA': (33.74, -84.38), 'Miami, FL': (25.76, -80.19)
+    }
+    
+    cities = list(city_coordinates.keys())
     
     data = []
     for i in range(n_facilities):
+        city = np.random.choice(cities)
+        base_lat, base_lon = city_coordinates[city]
+        
+        # Add some random variation around the city
+        lat = base_lat + np.random.normal(0, 0.3)
+        lon = base_lon + np.random.normal(0, 0.3)
+        
         # Create environmental justice patterns
         is_ej_community = np.random.choice([0, 1], p=[0.6, 0.4])
         
@@ -54,26 +77,9 @@ def generate_sample_data():
         )
         risk_score = min(1.0, max(0.0, risk_score))
         
-        # US state coordinates
-        states = ['CA', 'TX', 'FL', 'NY', 'IL', 'PA', 'OH', 'GA', 'NC', 'MI', 'NJ', 'VA']
-        state = np.random.choice(states)
-        
-        # State-specific coordinates (approximate)
-        state_coords = {
-            'CA': (36.77, -119.41), 'TX': (31.96, -99.90), 'FL': (27.76, -81.69),
-            'NY': (42.65, -75.70), 'IL': (40.63, -89.39), 'PA': (40.90, -77.84),
-            'OH': (40.42, -82.90), 'GA': (32.64, -83.44), 'NC': (35.63, -79.81),
-            'MI': (44.31, -85.60), 'NJ': (40.06, -74.40), 'VA': (37.76, -78.17)
-        }
-        
-        lat, lon = state_coords[state]
-        # Add some variation
-        lat += np.random.normal(0, 1)
-        lon += np.random.normal(0, 1)
-        
         data.append({
             'facility_id': f'FAC_{i:04d}',
-            'state': state,
+            'city': city,
             'latitude': lat,
             'longitude': lon,
             'violations_5yr': violations,
@@ -91,6 +97,65 @@ def generate_sample_data():
 if 'df' not in st.session_state:
     st.session_state.df = generate_sample_data()
 
+# Create Folium map function
+def create_folium_map(df, risk_threshold=0.6):
+    # Create base map centered on US
+    m = folium.Map(location=[39.8283, -98.5795], zoom_start=4)
+    
+    # Add markers for each facility
+    for _, row in df.iterrows():
+        risk = row['risk_score']
+        
+        # Determine color based on risk
+        if risk >= risk_threshold:
+            color = 'red'
+            size = 12
+        elif risk >= risk_threshold - 0.2:
+            color = 'orange'
+            size = 8
+        else:
+            color = 'green'
+            size = 6
+        
+        # Create popup text
+        popup_text = f"""
+        <b>Facility:</b> {row['facility_id']}<br>
+        <b>City:</b> {row['city']}<br>
+        <b>Risk Score:</b> {risk:.3f}<br>
+        <b>Violations (5yr):</b> {row['violations_5yr']}<br>
+        <b>Community Income:</b> ${row['community_income']:,.0f}<br>
+        <b>Minority %:</b> {row['community_minority_pct']:.1f}%
+        """
+        
+        # Add marker to map
+        folium.CircleMarker(
+            location=[row['latitude'], row['longitude']],
+            radius=size,
+            popup=folium.Popup(popup_text, max_width=300),
+            color=color,
+            fillColor=color,
+            fillOpacity=0.7,
+            weight=1
+        ).add_to(m)
+    
+    # Add legend
+    legend_html = '''
+    <div style="position: fixed; 
+                top: 10px; left: 50px; width: 200px; height: 120px; 
+                background-color: white; border:2px solid grey; z-index:9999; 
+                font-size:14px; padding: 10px">
+    <p><b>Risk Legend</b></p>
+    <p><span style="color:red;">●</span> High Risk (≥{threshold})</p>
+    <p><span style="color:orange;">●</span> Medium Risk</p>
+    <p><span style="color:green;">●</span> Low Risk</p>
+    <p><i>Size = Violation History</i></p>
+    </div>
+    '''.format(threshold=risk_threshold)
+    
+    m.get_root().html.add_child(folium.Element(legend_html))
+    
+    return m
+
 # Train simple model
 def train_model(df):
     features = ['violations_5yr', 'avg_fine_amount', 'days_since_last_inspection', 'community_income', 'community_minority_pct']
@@ -104,181 +169,119 @@ def train_model(df):
 if 'model' not in st.session_state:
     st.session_state.model, st.session_state.features = train_model(st.session_state.df)
 
-# Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["🌍 Risk Map", "📊 Analysis", "🏛️ Justice Patterns", "🔬 Methodology"])
+# Main app layout
+col1, col2 = st.columns([2, 1])
 
-with tab1:
+with col1:
     st.header("Environmental Risk Forecast Map")
     
-    risk_threshold = st.slider("Risk Threshold", 0.0, 1.0, 0.6, 0.05)
+    risk_threshold = st.slider(
+        "Risk Threshold", 
+        0.0, 1.0, 0.6, 0.05,
+        help="Adjust to highlight facilities above a certain risk level"
+    )
+    
+    # Create and display Folium map
+    folium_map = create_folium_map(st.session_state.df, risk_threshold)
+    st_folium(folium_map, width=700, height=500)
+
+with col2:
+    st.header("Risk Analysis")
     
     high_risk = st.session_state.df[st.session_state.df['risk_score'] >= risk_threshold]
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("High Risk Facilities", len(high_risk))
-    col2.metric("Total Facilities", len(st.session_state.df))
-    col3.metric("High Risk %", f"{(len(high_risk)/len(st.session_state.df)*100):.1f}%")
+    st.metric("High Risk Facilities", len(high_risk))
+    st.metric("Total Facilities", len(st.session_state.df))
+    st.metric("High Risk %", f"{(len(high_risk)/len(st.session_state.df)*100):.1f}%")
     
-    # Create map
-    fig = px.scatter_geo(
-        st.session_state.df,
-        lat="latitude",
-        lon="longitude",
-        color="risk_score",
-        size="violations_5yr",
-        hover_name="facility_id",
-        hover_data={
-            'state': True,
-            'violations_5yr': True,
-            'community_income': '$,.0f',
-            'community_minority_pct': '.1%',
-            'risk_score': '.3f'
-        },
-        color_continuous_scale="Viridis",
-        scope='north america',
-        title="Environmental Risk Forecast - US Facilities"
-    )
+    # Risk distribution
+    st.subheader("Risk Distribution")
+    risk_bins = pd.cut(st.session_state.df['risk_score'], bins=[0, 0.3, 0.6, 1.0])
+    risk_counts = risk_bins.value_counts().sort_index()
     
-    st.plotly_chart(fig, use_container_width=True)
-
-with tab2:
-    st.header("Predictive Analytics")
+    for bin_range, count in risk_counts.items():
+        st.write(f"{bin_range}: {count} facilities")
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Model Performance")
-        st.metric("Accuracy", "82%")
-        st.metric("Precision", "76%")
-        st.metric("Recall", "88%")
-        
-        st.info("""
-        **Model**: Random Forest Classifier
-        **Purpose**: Predict facilities at high risk of future violations
-        """)
-    
-    with col2:
-        st.subheader("Feature Importance")
-        
-        importances = st.session_state.model.feature_importances_
-        feature_names = ['Violations', 'Fines', 'Inspection Gap', 'Income', 'Minority %']
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=feature_names,
-            y=importances,
-            marker_color='lightcoral'
-        ))
-        fig.update_layout(title="What Drives Risk Predictions?")
-        st.plotly_chart(fig, use_container_width=True)
-
-with tab3:
-    st.header("Environmental Justice Patterns")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Income vs Risk
-        fig1 = px.scatter(
-            st.session_state.df,
-            x='community_income',
-            y='risk_score',
-            color='community_minority_pct',
-            title="Income vs Risk Score",
-            labels={'community_income': 'Community Income', 'risk_score': 'Risk Score'}
-        )
-        st.plotly_chart(fig1, use_container_width=True)
-    
-    with col2:
-        # Risk by demographic groups
-        st.session_state.df['demographic_group'] = pd.cut(
-            st.session_state.df['community_minority_pct'], 
-            bins=[0, 25, 50, 75, 100],
-            labels=['0-25%', '25-50%', '50-75%', '75-100%']
-        )
-        
-        group_stats = st.session_state.df.groupby('demographic_group').agg({
-            'risk_score': 'mean',
-            'violations_5yr': 'mean'
-        }).reset_index()
-        
-        fig2 = px.bar(
-            group_stats,
-            x='demographic_group',
-            y='risk_score',
-            title="Average Risk by Minority Percentage",
-            color='risk_score',
-            color_continuous_scale='viridis'
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-    
-    # Key findings
-    st.subheader("Key Findings")
-    
+    # Environmental justice insights
+    st.subheader("Justice Insights")
     high_minority = st.session_state.df[st.session_state.df['community_minority_pct'] > 50]
     low_minority = st.session_state.df[st.session_state.df['community_minority_pct'] <= 50]
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("High Minority Areas - Avg Risk", f"{high_minority['risk_score'].mean():.3f}")
-    col2.metric("Low Minority Areas - Avg Risk", f"{low_minority['risk_score'].mean():.3f}")
-    col3.metric("Risk Gap", f"{(high_minority['risk_score'].mean() - low_minority['risk_score'].mean()):.3f}")
+    st.write(f"High minority areas: {high_minority['risk_score'].mean():.3f} avg risk")
+    st.write(f"Low minority areas: {low_minority['risk_score'].mean():.3f} avg risk")
+    
+    risk_gap = high_minority['risk_score'].mean() - low_minority['risk_score'].mean()
+    st.write(f"Risk gap: {risk_gap:.3f}")
 
-with tab4:
-    st.header("Methodology & Purpose")
+# Additional analysis tabs
+tab1, tab2 = st.tabs(["📊 Detailed Analysis", "🔍 Facility Details"])
+
+with tab1:
+    st.header("Predictive Model Insights")
     
-    st.markdown("""
-    ### 🎯 Research Objective
+    col1, col2 = st.columns(2)
     
-    This tool demonstrates how **predictive analytics** can identify communities at risk of 
-    environmental regulatory failures **before** harm occurs.
+    with col1:
+        st.subheader("Feature Importance")
+        importances = st.session_state.model.feature_importances_
+        features = ['Violations', 'Fines', 'Inspection Gap', 'Income', 'Minority %']
+        
+        importance_df = pd.DataFrame({
+            'Feature': features,
+            'Importance': importances
+        }).sort_values('Importance', ascending=True)
+        
+        st.bar_chart(importance_df.set_index('Feature'))
     
-    ### 📊 Data Patterns (Synthetic)
+    with col2:
+        st.subheader("Risk Patterns")
+        
+        # Create a simple scatter plot using native Streamlit
+        chart_data = st.session_state.df[['community_income', 'risk_score', 'community_minority_pct']].copy()
+        chart_data['minority_high'] = chart_data['community_minority_pct'] > 50
+        
+        st.scatter_chart(
+            chart_data,
+            x='community_income',
+            y='risk_score',
+            color='minority_high',
+            title='Income vs Risk Score'
+        )
+
+with tab2:
+    st.header("Facility Details")
     
-    The synthetic data replicates documented environmental justice patterns:
-    - **Lower-income communities** face more violations
-    - **Minority communities** experience weaker enforcement
-    - **Historical patterns** predict future risks
+    # Sort by risk score
+    display_df = st.session_state.df.sort_values('risk_score', ascending=False)
     
-    ### 🔮 Predictive Approach
+    # Format for display
+    display_df_detailed = display_df[[
+        'facility_id', 'city', 'risk_score', 'violations_5yr', 
+        'community_income', 'community_minority_pct'
+    ]].copy()
     
-    **Traditional**: Document harm after it occurs  
-    **This Approach**: Identify risks before they materialize
+    display_df_detailed['community_income'] = display_df_detailed['community_income'].apply(lambda x: f"${x:,.0f}")
+    display_df_detailed['community_minority_pct'] = display_df_detailed['community_minority_pct'].apply(lambda x: f"{x:.1f}%")
+    display_df_detailed['risk_score'] = display_df_detailed['risk_score'].apply(lambda x: f"{x:.3f}")
     
-    ### 🛠️ Technical Details
-    
-    - **Algorithm**: Random Forest Classifier
-    - **Features**: Violation history, enforcement patterns, community demographics
-    - **Output**: Risk scores (0-1) for each facility
-    
-    ### 🌟 Real-World Application
-    
-    In production, this would:
-    - Use real EPA ECHO API data
-    - Enable proactive policy interventions
-    - Empower community advocacy
-    - Guide targeted enforcement
-    """)
-    
-    st.warning("""
-    **Note**: This is a research demonstration using synthetic data patterns. 
-    Real implementation would require integration with actual regulatory databases.
-    """)
+    st.dataframe(display_df_detailed, use_container_width=True)
 
 # Footer
 st.markdown("---")
 st.markdown(
     "**ECHO Forecast Demo** | Environmental Justice Research | "
-    "Built with Streamlit + Plotly | Predictive Analytics for Preventive Justice"
+    "Folium + Streamlit | Predictive Analytics for Preventive Justice"
 )
 
 # Sidebar
-st.sidebar.header("Quick Actions")
-if st.sidebar.button("🔄 Regenerate Data"):
+st.sidebar.header("Controls")
+if st.sidebar.button("🔄 Generate New Data"):
     st.session_state.df = generate_sample_data()
     st.session_state.model, st.session_state.features = train_model(st.session_state.df)
     st.rerun()
 
-st.sidebar.header("Dataset Info")
-st.sidebar.metric("Facilities", len(st.session_state.df))
-st.sidebar.metric("Avg Risk Score", f"{st.session_state.df['risk_score'].mean():.3f}")
-st.sidebar.metric("High Risk Facilities", f"{(st.session_state.df['risk_score'] > 0.6).sum()}")
+st.sidebar.header("About")
+st.sidebar.info(
+    "This demo shows how machine learning can predict environmental "
+    "regulatory failures before they occur, enabling preventive justice."
+)
