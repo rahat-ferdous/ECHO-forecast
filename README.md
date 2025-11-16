@@ -3,7 +3,7 @@
 A Streamlit demo showing how machine learning can predict environmental regulatory failures before they occur.
 
 ## 🚀 Live Demo
-[![Streamlit App](https://echo-forecast.streamlit.app/)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://echo-forecast.streamlit.app/)
 
 ## 📊 What It Does
 
