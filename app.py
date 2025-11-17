@@ -4,6 +4,8 @@ import numpy as np
 import folium
 from streamlit_folium import st_folium
 from sklearn.ensemble import RandomForestClassifier
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Page configuration
 st.set_page_config(
@@ -236,17 +238,23 @@ with tab1:
     with col2:
         st.subheader("Risk Patterns")
         
-        # Create a simple scatter plot using native Streamlit
+        # Create a scatter plot using Plotly (fixed version)
         chart_data = st.session_state.df[['community_income', 'risk_score', 'community_minority_pct']].copy()
         chart_data['minority_high'] = chart_data['community_minority_pct'] > 50
         
-        st.scatter_chart(
+        scatter_fig = px.scatter(
             chart_data,
             x='community_income',
             y='risk_score',
             color='minority_high',
-            title='Income vs Risk Score'
+            title='Income vs Risk Score',
+            labels={
+                'community_income': 'Community Income ($)',
+                'risk_score': 'Risk Score',
+                'minority_high': 'High Minority %'
+            }
         )
+        st.plotly_chart(scatter_fig, use_container_width=True)
 
 with tab2:
     st.header("Facility Details")
@@ -266,6 +274,32 @@ with tab2:
     
     st.dataframe(display_df_detailed, use_container_width=True)
 
+# Methodology section
+with st.expander("🔬 Methodology & Research Context"):
+    st.markdown("""
+    ### Research Objective
+    This tool demonstrates how **predictive analytics** can identify communities at risk of 
+    environmental regulatory failures **before** harm occurs, enabling preventive environmental justice.
+    
+    ### Data Patterns (Synthetic)
+    The synthetic data replicates documented environmental justice patterns:
+    - **Lower-income communities** face more violations
+    - **Minority communities** experience weaker enforcement  
+    - **Historical patterns** predict future risks
+    
+    ### Technical Approach
+    - **Algorithm**: Random Forest Classifier
+    - **Features**: Violation history, enforcement patterns, community demographics
+    - **Output**: Risk scores (0-1) for proactive intervention
+    
+    ### Real-World Application
+    In production, this would enable:
+    - Proactive policy interventions
+    - Targeted enforcement resources
+    - Community-led advocacy
+    - Preventive environmental justice
+    """)
+
 # Footer
 st.markdown("---")
 st.markdown(
@@ -279,6 +313,11 @@ if st.sidebar.button("🔄 Generate New Data"):
     st.session_state.df = generate_sample_data()
     st.session_state.model, st.session_state.features = train_model(st.session_state.df)
     st.rerun()
+
+st.sidebar.header("Dataset Info")
+st.sidebar.metric("Facilities", len(st.session_state.df))
+st.sidebar.metric("Avg Risk Score", f"{st.session_state.df['risk_score'].mean():.3f}")
+st.sidebar.metric("High Risk Facilities", f"{(st.session_state.df['risk_score'] > 0.6).sum()}")
 
 st.sidebar.header("About")
 st.sidebar.info(
